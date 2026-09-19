@@ -144,7 +144,7 @@ class MapErrorBoundary extends Component {
 }
 
 /**
- * Interactive map showing clinics (Supabase), pet stores (OSM/Overpass) and
+ * Interactive map showing clinics (VetAnimals API), pet stores (OSM/Overpass) and
  * the user's location. Only places with valid coordinates are ever passed in.
  * @param {{
  *   clinics: Array,

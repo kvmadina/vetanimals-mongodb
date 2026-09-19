@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext.jsx'
 import { useCart } from '../context/CartContext.jsx'
 import { fetchProductsByIds, formatPrice, getShopErrorMessage } from '../lib/shop.js'
-import { createOrder, getOrderErrorMessage, shortOrderId } from '../lib/orders.js'
-import { isStripeConfigured } from '../lib/stripe.js'
-import StripePaymentForm from '../components/StripePaymentForm.jsx'
+import { createOrder, getOrderErrorMessage, payOrder, shortOrderId } from '../lib/orders.js'
 import AppHeader from '../components/AppHeader.jsx'
 import ProductImage from '../components/ProductImage.jsx'
 import {
@@ -20,11 +17,15 @@ import {
 } from '../components/Icons.jsx'
 
 /**
- * Re-validate every cart line against the CURRENT database state:
+ * Re-validate every cart line against the CURRENT catalogue:
  * - product still exists and is active
  * - requested quantity is within current stock
- * - prices are the current Supabase prices (never the client's snapshot)
- * Returns the verified lines (with database prices) plus any blocking issues.
+ * - prices are the current shop prices (never the client's snapshot)
+ * Returns the verified lines (with server prices) plus any blocking issues.
+ *
+ * This is a UX check so the summary is honest before submitting. The server
+ * re-prices every line again when the order is created — it never trusts what
+ * this function computed.
  */
 async function runVerification(items) {
   const freshList = await fetchProductsByIds(items.map((item) => item.id))
@@ -73,7 +74,6 @@ function FieldError({ message }) {
 }
 
 export default function Checkout() {
-  const { user } = useAuth()
   const { items, removeItem, closeCart } = useCart()
 
   const [shipping, setShipping] = useState({
@@ -97,9 +97,25 @@ export default function Checkout() {
   const [submitting, setSubmitting] = useState(false)
   const [orderError, setOrderError] = useState('')
   const [placedOrder, setPlacedOrder] = useState(null)
-  const [paymentDone, setPaymentDone] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [payError, setPayError] = useState('')
 
-  const handlePaymentDone = useCallback(() => setPaymentDone(true), [])
+  // Demo payment: no card is collected and no money moves — the server simply
+  // moves the order from pending to paid so the rest of the flow can be seen.
+  const handlePay = useCallback(async () => {
+    if (!placedOrder || paying) return
+    setPaying(true)
+    setPayError('')
+    try {
+      const paid = await payOrder(placedOrder.id)
+      setPlacedOrder(paid)
+    } catch (err) {
+      console.error('[Checkout] Demo payment failed:', err)
+      setPayError(getOrderErrorMessage(err, 'Could not confirm the payment. Please try again.'))
+    } finally {
+      setPaying(false)
+    }
+  }, [placedOrder, paying])
 
   // Close the mini cart drawer when landing here (same as Cart page)
   useEffect(() => {
@@ -195,17 +211,18 @@ export default function Checkout() {
         .filter(Boolean)
         .join('\n')
 
-      const order = await createOrder(user.id, {
+      // Only ids and quantities go to the server; it looks up the price of
+      // each line itself, so a tampered client price cannot change the total.
+      const order = await createOrder({
         shippingAddress,
         lines: result.lines.map((line) => ({
           product_id: line.id,
           quantity: line.quantity,
-          price_at_purchase: line.price,
         })),
       })
 
-      // Only now — after Supabase confirmed both inserts — clear the cart.
-      // removeItem per purchased id (never a blanket clear on failure paths).
+      // Only now — after the server confirmed the order and its lines — clear
+      // the cart. removeItem per purchased id, never a blanket clear.
       for (const line of result.lines) removeItem(line.id)
 
       setPlacedOrder(order)
@@ -220,10 +237,10 @@ export default function Checkout() {
   }
 
   // -------------------------------------------------------------------------
-  // Success screen — shown only after Supabase confirmed the order + items.
+  // Success screen — shown only after the server confirmed the order + items.
   // -------------------------------------------------------------------------
   if (placedOrder) {
-    const paid = paymentDone || placedOrder.status === 'paid'
+    const paid = placedOrder.status === 'paid'
     return (
       <div className="min-h-screen bg-slate-50">
         <AppHeader />
@@ -239,8 +256,7 @@ export default function Checkout() {
               Your order <span className="font-semibold text-slate-700">{shortOrderId(placedOrder.id)}</span>{' '}
               has been received and is currently{' '}
               <span className="font-semibold text-slate-700">{paid ? 'paid' : 'pending'}</span>.
-              {!paid && isStripeConfigured && ' Complete the secure payment below to confirm your purchase.'}
-              {!paid && !isStripeConfigured && ' No payment has been taken — you have not been charged.'}
+              {!paid && ' Confirm the demo payment below to move it forward.'}
             </p>
             <dl className="mx-auto mt-8 grid max-w-sm grid-cols-2 gap-4 text-left">
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
@@ -255,17 +271,45 @@ export default function Checkout() {
               </div>
             </dl>
 
-            {!paid && isStripeConfigured && (
-              <div className="mt-8 border-t border-slate-100 pt-8 text-left">
-                <p className="mb-4 flex items-center justify-center gap-2 text-sm font-semibold text-slate-900">
+            {!paid && (
+              <div className="mt-8 border-t border-slate-100 pt-8">
+                <p className="mb-2 flex items-center justify-center gap-2 text-sm font-semibold text-slate-900">
                   <LockIcon className="h-4 w-4 text-emerald-700" />
-                  Complete payment
+                  Demo payment
                 </p>
-                <StripePaymentForm
-                  orderId={placedOrder.id}
-                  total={Number(placedOrder.total_amount)}
-                  onPaid={handlePaymentDone}
-                />
+                <p className="mx-auto mb-5 max-w-sm text-xs leading-relaxed text-slate-400">
+                  This is a demo checkout. No card details are collected and no
+                  money is taken — confirming just marks the order as paid.
+                </p>
+
+                {payError && (
+                  <div role="alert" className="form-banner--error mb-4 text-left">
+                    <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{payError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handlePay}
+                  disabled={paying}
+                  className="btn-primary w-full sm:w-auto"
+                >
+                  {paying ? (
+                    <>
+                      <span
+                        className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                        aria-hidden="true"
+                      />
+                      Confirming…
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheckIcon className="h-4 w-4" />
+                      Confirm payment of {formatPrice(placedOrder.total_amount)}
+                    </>
+                  )}
+                </button>
               </div>
             )}
 

@@ -249,14 +249,9 @@ export default function AppointmentNew() {
     setSubmitError('')
     try {
       const appointmentDate = new Date(`${date}T${time}:00`).toISOString()
-      await createAppointment({
-        userId: user.id,
-        petId,
-        vetId,
-        clinicId: selectedVet.clinic_id,
-        appointmentDate,
-        notes,
-      })
+      // The clinic is derived from the chosen vet on the server, so it is not
+      // sent from here.
+      await createAppointment({ petId, vetId, appointmentDate, notes })
       setSuccess(true)
     } catch (err) {
       console.error('[AppointmentNew] Booking failed:', err)
@@ -270,7 +265,7 @@ export default function AppointmentNew() {
   }
 
   // -------------------------------------------------------------------------
-  // Success screen (only after Supabase confirms the insert)
+  // Success screen (only after the server confirms the booking)
   // -------------------------------------------------------------------------
   if (success) {
     return (

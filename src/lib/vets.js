@@ -1,75 +1,17 @@
 // ---------------------------------------------------------------------------
 // Veterinary discovery data layer.
-// Reads real data from public.veterinarians and public.clinics through the
-// shared Supabase client. RLS allows public reads of both tables; favorites
-// are handled separately via public.favorites.
+// Reads /api/veterinarians and /api/clinics. Both are public endpoints;
+// favorites are handled separately in favorites.js.
 // ---------------------------------------------------------------------------
-import { supabase } from './supabase'
-
-const VET_SELECT = `
-  id,
-  created_at,
-  name,
-  specialty,
-  bio,
-  avatar_url,
-  license_number,
-  clinic_id,
-  clinics ( id, name, address, phone, email, website, latitude, longitude )
-`
-
-const CLINIC_SELECT = `
-  id,
-  name,
-  address,
-  phone,
-  email,
-  website,
-  latitude,
-  longitude
-`
-
-/** Strip PostgREST-special characters from a search term. */
-function sanitizeSearchTerm(search) {
-  return search
-    .replace(/[(),%_]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+import { api, isNetworkError, queryString } from './api.js'
 
 /**
  * Fetch veterinarians with optional filters.
  * @param {{ search?: string, specialty?: string, clinicId?: string }} options
  * @returns {Promise<Array>}
  */
-export async function fetchVeterinarians({
-  search = '',
-  specialty = '',
-  clinicId = '',
-} = {}) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-
-  let query = supabase.from('veterinarians').select(VET_SELECT)
-
-  if (clinicId) {
-    query = query.eq('clinic_id', clinicId)
-  }
-  if (specialty) {
-    query = query.eq('specialty', specialty)
-  }
-
-  const term = sanitizeSearchTerm(search)
-  if (term) {
-    // Internal spaces become wildcards so multi-word queries match across
-    // word boundaries. Only plain columns — PostgREST `or()` does not support
-    // embedded (clinics.name) filters.
-    const q = `%${term.replace(/\s+/g, '%')}%`
-    query = query.or(`name.ilike.${q},specialty.ilike.${q}`)
-  }
-
-  const { data, error } = await query.order('name')
-  if (error) throw error
-  return data ?? []
+export async function fetchVeterinarians({ search = '', specialty = '', clinicId = '' } = {}) {
+  return (await api(`/veterinarians${queryString({ search, specialty, clinicId })}`)) ?? []
 }
 
 /**
@@ -78,19 +20,7 @@ export async function fetchVeterinarians({
  * @returns {Promise<Array>}
  */
 export async function fetchClinics({ search = '' } = {}) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-
-  let query = supabase.from('clinics').select(CLINIC_SELECT)
-
-  const term = sanitizeSearchTerm(search)
-  if (term) {
-    const q = `%${term.replace(/\s+/g, '%')}%`
-    query = query.or(`name.ilike.${q},address.ilike.${q}`)
-  }
-
-  const { data, error } = await query.order('name')
-  if (error) throw error
-  return data ?? []
+  return (await api(`/clinics${queryString({ search })}`)) ?? []
 }
 
 /**
@@ -98,14 +28,7 @@ export async function fetchClinics({ search = '' } = {}) {
  * @returns {Promise<string[]>}
  */
 export async function fetchSpecialties() {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('veterinarians')
-    .select('specialty')
-    .not('specialty', 'is', null)
-  if (error) throw error
-  const values = [...new Set((data ?? []).map((row) => row.specialty).filter(Boolean))]
-  return values.sort((a, b) => a.localeCompare(b))
+  return (await api('/veterinarians/specialties')) ?? []
 }
 
 /**
@@ -114,32 +37,24 @@ export async function fetchSpecialties() {
  * @returns {Promise<object|null>}
  */
 export async function fetchVeterinarianById(id) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('veterinarians')
-    .select(VET_SELECT)
-    .eq('id', id)
-    .maybeSingle()
-  if (error) throw error
-  return data
+  try {
+    return await api(`/veterinarians/${id}`)
+  } catch (error) {
+    if (error.status === 404) return null
+    throw error
+  }
 }
 
 /**
- * Fetch active veterinarians by a list of ids (used by the Favorites page).
+ * Fetch veterinarians by a list of ids (used by the Favorites page).
  * Deleted/unavailable rows are simply omitted — never crashes the page.
  * @param {string[]} ids
  * @returns {Promise<Array>}
  */
 export async function fetchVetsByIds(ids) {
   const clean = [...new Set(ids)].filter(Boolean)
-  if (!supabase || clean.length === 0) return []
-  const { data, error } = await supabase
-    .from('veterinarians')
-    .select(VET_SELECT)
-    .in('id', clean)
-    .order('name')
-  if (error) throw error
-  return data ?? []
+  if (clean.length === 0) return []
+  return (await api(`/veterinarians${queryString({ ids: clean.join(',') })}`)) ?? []
 }
 
 /**
@@ -150,53 +65,36 @@ export async function fetchVetsByIds(ids) {
  */
 export async function fetchClinicsByIds(ids) {
   const clean = [...new Set(ids)].filter(Boolean)
-  if (!supabase || clean.length === 0) return []
-  const { data, error } = await supabase
-    .from('clinics')
-    .select(CLINIC_SELECT)
-    .in('id', clean)
-    .order('name')
-  if (error) throw error
-  return data ?? []
+  if (clean.length === 0) return []
+  return (await api(`/clinics${queryString({ ids: clean.join(',') })}`)) ?? []
 }
 
 /**
- * Fetch the veterinarian profile(s) linked to a user account (the
+ * Fetch the veterinarian profile(s) linked to the signed-in account (the
  * veterinarian portal uses this to identify which clinic the vet belongs to).
- * @param {string} userId
+ * The server reads the account from the token, so no id is sent.
  * @returns {Promise<Array>}
  */
-export async function fetchVetsByUserId(userId) {
-  if (!supabase || !userId) return []
-  const { data, error } = await supabase
-    .from('veterinarians')
-    .select(VET_SELECT)
-    .eq('user_id', userId)
-    .order('name')
-  if (error) throw error
-  return data ?? []
+export async function fetchMyVetProfiles() {
+  return (await api('/veterinarians/me')) ?? []
 }
 
 /**
- * Fetch a single clinic by id, including its associated veterinarians.
+ * Fetch a single clinic by id, including its veterinarians.
  * @param {string} id
  * @returns {Promise<object|null>}
  */
 export async function fetchClinicById(id) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('clinics')
-    .select(
-      `${CLINIC_SELECT}, veterinarians ( id, name, specialty, bio, avatar_url, license_number )`,
-    )
-    .eq('id', id)
-    .maybeSingle()
-  if (error) throw error
-  return data
+  try {
+    return await api(`/clinics/${id}`)
+  } catch (error) {
+    if (error.status === 404) return null
+    throw error
+  }
 }
 
 /**
- * Convert a raw Supabase error into a friendly message.
+ * Convert an API error into a friendly message.
  * @param {{ code?: string, message?: string } | null} error
  * @param {string} fallback
  * @returns {string}
@@ -206,19 +104,14 @@ export function getVetsErrorMessage(
   fallback = 'Something went wrong. Please try again.',
 ) {
   if (!error) return ''
-
-  const code = String(error.code || '')
-  if (code === 'PGRST116') {
-    return 'This entry is no longer available.'
-  }
-  if (code === '42501') {
-    return 'You do not have permission to perform that action.'
-  }
-
-  const raw = String(error.message || '')
-  if (/network|failed to fetch|fetch failed|load failed/i.test(raw)) {
+  if (isNetworkError(error)) {
     return 'Unable to reach the server. Please check your internet connection and try again.'
   }
-
+  if (error.code === 'not-found') {
+    return 'This entry is no longer available.'
+  }
+  if (error.code === 'forbidden') {
+    return 'You do not have permission to perform that action.'
+  }
   return fallback
 }

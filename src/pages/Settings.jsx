@@ -1,11 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
-import {
-  deleteAvatarFiles,
-  uploadAvatar,
-  validateAvatarFile,
-} from '../lib/avatars.js'
 import { getAuthErrorMessage } from '../lib/authErrors.js'
 import AppHeader from '../components/AppHeader.jsx'
 import Avatar from '../components/Avatar.jsx'
@@ -23,6 +18,7 @@ import {
 } from '../components/Icons.jsx'
 
 const PHONE_PATTERN = /^[+()\-.\s\d]{7,20}$/
+const URL_PATTERN = /^https?:\/\/\S+$/i
 
 export default function Settings() {
   const { user, profile, refreshProfile, updateProfile, updatePassword, signIn } = useAuth()
@@ -35,10 +31,11 @@ export default function Settings() {
   const [profileError, setProfileError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
 
-  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  // Avatars are plain image URLs — the same approach the pet form already
+  // uses, so there is no file storage to run.
+  const [avatarInput, setAvatarInput] = useState('')
+  const [savingAvatar, setSavingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState('')
-  const [avatarPreview, setAvatarPreview] = useState(null)
-  const fileInputRef = useRef(null)
 
   // Password change
   const [currentPassword, setCurrentPassword] = useState('')
@@ -54,54 +51,44 @@ export default function Settings() {
     if (!profile || formLoaded) return
     setFullName(profile.full_name || '')
     setPhone(profile.phone || '')
+    setAvatarInput(profile.avatar_url || '')
     setFormLoaded(true)
   }, [profile, formLoaded])
 
-  // Clean up the object URL when the preview changes
-  useEffect(() => {
-    return () => {
-      if (avatarPreview) URL.revokeObjectURL(avatarPreview)
-    }
-  }, [avatarPreview])
-
-  const handleAvatarChange = async (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file || !user) return
-
+  const handleSaveAvatar = async (e) => {
+    e.preventDefault()
+    const url = avatarInput.trim()
     setAvatarError('')
-    const validation = validateAvatarFile(file)
-    if (validation) {
-      setAvatarError(validation)
+
+    if (url && !URL_PATTERN.test(url)) {
+      setAvatarError('Photo URL must start with http:// or https://')
       return
     }
 
-    setAvatarPreview(URL.createObjectURL(file))
-    setUploadingAvatar(true)
+    setSavingAvatar(true)
     try {
-      const publicUrl = await uploadAvatar(user.id, file)
-      await updateProfile({ avatar_url: publicUrl })
-      await refreshProfile()
-      showToast('Profile photo updated')
+      await updateProfile({ avatar_url: url })
+      showToast(url ? 'Profile photo updated' : 'Profile photo removed')
     } catch (err) {
-      console.error('[Settings] Avatar upload failed:', err)
-      setAvatarError('Could not upload the photo. Please try again.')
+      console.error('[Settings] Avatar save failed:', err)
+      setAvatarError('Could not save the photo. Please try again.')
     } finally {
-      setUploadingAvatar(false)
+      setSavingAvatar(false)
     }
   }
 
   const handleRemoveAvatar = async () => {
-    if (!user) return
     setAvatarError('')
+    setSavingAvatar(true)
     try {
-      await deleteAvatarFiles(user.id)
       await updateProfile({ avatar_url: '' })
-      await refreshProfile()
+      setAvatarInput('')
       showToast('Profile photo removed')
     } catch (err) {
       console.error('[Settings] Avatar removal failed:', err)
       setAvatarError('Could not remove the photo. Please try again.')
+    } finally {
+      setSavingAvatar(false)
     }
   }
 
@@ -204,7 +191,7 @@ export default function Settings() {
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-base font-bold tracking-tight text-slate-900">Profile photo</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Shown next to your name across VetAnimals.
+              Paste a link to an image. Shown next to your name across VetAnimals.
             </p>
 
             {avatarError && (
@@ -214,55 +201,56 @@ export default function Settings() {
               </div>
             )}
 
-            <div className="mt-5 flex flex-wrap items-center gap-5">
-              <div className="relative">
-                {avatarPreview ? (
-                  <img
-                    src={avatarPreview}
-                    alt="New profile photo preview"
-                    className="h-20 w-20 rounded-full object-cover ring-2 ring-emerald-100"
-                  />
-                ) : (
-                  <Avatar src={avatarUrl} name={fullName || 'Member'} className="h-20 w-20 text-2xl" />
-                )}
-                {uploadingAvatar && (
-                  <span
-                    className="absolute -inset-1 flex items-center justify-center rounded-full bg-white/70"
-                    aria-hidden="true"
-                  >
-                    <span
-                      className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent"
-                      role="status"
-                      aria-label="Uploading photo"
-                    />
-                  </span>
-                )}
-              </div>
+            <form
+              onSubmit={handleSaveAvatar}
+              noValidate
+              className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-start"
+            >
+              {/* Live preview of whatever is currently typed */}
+              <Avatar
+                src={URL_PATTERN.test(avatarInput.trim()) ? avatarInput.trim() : avatarUrl}
+                name={fullName || 'Member'}
+                className="h-20 w-20 shrink-0 text-2xl"
+              />
 
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingAvatar} className="btn-secondary">
-                  <CameraIcon className="h-4 w-4" />
-                  {avatarUrl ? 'Change photo' : 'Upload photo'}
-                </button>
-                {avatarUrl && (
-                  <button
-                    type="button"
-                    onClick={handleRemoveAvatar}
-                    disabled={uploadingAvatar}
-                    className="btn-secondary text-red-600 hover:bg-red-50 hover:text-red-700"
-                  >
-                    Remove
+              <div className="min-w-0 flex-1">
+                <label htmlFor="settings-avatar" className="form-label">
+                  Photo URL
+                </label>
+                <div className="relative">
+                  <CameraIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    id="settings-avatar"
+                    name="avatarUrl"
+                    type="url"
+                    autoComplete="off"
+                    value={avatarInput}
+                    onChange={(e) => setAvatarInput(e.target.value)}
+                    placeholder="https://example.com/photo.jpg"
+                    className={`input-field pl-10 ${avatarError ? 'input-field--error' : ''}`}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Leave empty to use the generated initials avatar.
+                </p>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="submit" disabled={savingAvatar} className="btn-primary">
+                    {savingAvatar ? 'Saving…' : 'Save photo'}
                   </button>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  onChange={handleAvatarChange}
-                />
+                  {avatarUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveAvatar}
+                      disabled={savingAvatar}
+                      className="btn-secondary text-red-600 hover:bg-red-50 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            </form>
           </section>
 
           {/* ------------------------------------------------ PERSONAL DETAILS */}
@@ -335,8 +323,8 @@ export default function Settings() {
                   />
                 </div>
                 <p className="mt-1.5 text-xs text-slate-400">
-                  Email changes must go through Supabase Auth and are not
-                  available in Settings.
+                  Your email is the account identifier and cannot be changed
+                  from Settings.
                 </p>
               </div>
 

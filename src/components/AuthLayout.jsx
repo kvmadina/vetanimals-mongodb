@@ -117,7 +117,7 @@ export default function AuthLayout({ title, subtitle, children }) {
           </div>
 
           <p className="mt-6 text-center text-xs text-slate-400">
-            Secure sign-in powered by Supabase Auth
+            Passwords are hashed and never stored in plain text
           </p>
         </div>
       </main>

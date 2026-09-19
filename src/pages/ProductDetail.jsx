@@ -125,7 +125,7 @@ export default function ProductDetail() {
     }
   }, [status, product])
 
-  // Recently viewed (client-side browsing history, fetched from Supabase by id)
+  // Recently viewed (client-side browsing history, fetched from the API by id)
   useEffect(() => {
     if (status !== 'ready') return
     const ids = getRecentProductIds().filter((id) => id !== productId)

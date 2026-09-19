@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useAuth } from '../context/AuthContext.jsx'
 import { fetchPets, createPet, updatePet, deletePet, getPetErrorMessage } from '../lib/pets.js'
 import AppHeader from '../components/AppHeader.jsx'
 import PetCard from '../components/PetCard.jsx'
@@ -25,7 +24,8 @@ function PetCardSkeleton() {
 }
 
 export default function Pets() {
-  const { user } = useAuth()
+  // The API scopes every /pets call to the signed-in owner, so this page never
+  // needs the user id itself.
   const [pets, setPets] = useState([])
   const [status, setStatus] = useState('loading') // 'loading' | 'error' | 'ready'
   const [error, setError] = useState('')
@@ -65,7 +65,7 @@ export default function Pets() {
       const updated = await updatePet(editingPet.id, payload)
       setPets((prev) => prev.map((pet) => (pet.id === updated.id ? updated : pet)))
     } else {
-      const created = await createPet(user.id, payload)
+      const created = await createPet(payload)
       setPets((prev) => [created, ...prev])
     }
   }

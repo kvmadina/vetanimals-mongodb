@@ -61,7 +61,7 @@ export default function Vets() {
   const [specialty, setSpecialty] = useState('')
   const [clinicId, setClinicId] = useState(searchParams.get('clinic') || '')
 
-  // Debounce the search box before hitting Supabase
+  // Debounce the search box before hitting the API
   useEffect(() => {
     const timer = setTimeout(() => setQuery(searchInput.trim()), 350)
     return () => clearTimeout(timer)

@@ -173,7 +173,7 @@ export default function Shop() {
   const [quickViewProduct, setQuickViewProduct] = useState(null)
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
 
-  // Debounce the search box before hitting Supabase
+  // Debounce the search box before hitting the API
   useEffect(() => {
     const timer = setTimeout(() => setQuery(searchInput.trim()), 350)
     return () => clearTimeout(timer)

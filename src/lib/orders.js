@@ -1,51 +1,20 @@
 // ---------------------------------------------------------------------------
 // Orders data layer.
-// Backed by public.orders + public.order_items through the shared Supabase
-// client. RLS guarantees users only ever see, create and cancel their own
-// orders, and only pending orders can be cancelled (pending -> cancelled).
-// NOTE: the database has no stock-reservation trigger, so nothing here claims
-// stock is reserved — quantities are only validated against current stock.
+//
+// Line prices are decided by the server from the current catalogue — whatever
+// the cart thinks a product costs is never used as the purchase price. The
+// server also validates quantities against current stock, but nothing here
+// claims stock is reserved: it is not.
 // ---------------------------------------------------------------------------
-import { supabase } from './supabase'
+import { api, isNetworkError } from './api.js'
 
-const ORDER_SELECT = `
-  id,
-  user_id,
-  created_at,
-  status,
-  total_amount,
-  shipping_address,
-  order_items (
-    id,
-    quantity,
-    price_at_purchase,
-    products ( id, name, image_url )
-  )
-`
-
-// Admin listing also resolves the customer (profiles) for each order.
-const ADMIN_ORDER_SELECT = `
-  id,
-  created_at,
-  status,
-  total_amount,
-  shipping_address,
-  profiles ( id, full_name, email ),
-  order_items (
-    id,
-    quantity,
-    price_at_purchase,
-    products ( id, name, image_url )
-  )
-`
-
-/** All valid order statuses (matches the database CHECK constraint). */
+/** All valid order statuses (matches the schema's enum). */
 export const ORDER_STATUSES = ['pending', 'paid', 'shipped', 'cancelled', 'completed']
 
 /**
- * Sensible workflow transitions per status. The database itself permits any
- * status change for admins; this map is a UX guard to prevent nonsensical
- * jumps (e.g. pending -> completed). Cancelled/completed are terminal.
+ * Sensible workflow transitions per status. This map is a UX guard that stops
+ * nonsensical jumps (e.g. pending -> completed); the server accepts any valid
+ * status from an admin. Cancelled/completed are terminal.
  */
 export const NEXT_ORDER_STATUSES = {
   pending: ['paid', 'cancelled'],
@@ -56,127 +25,75 @@ export const NEXT_ORDER_STATUSES = {
 }
 
 /**
- * Fetch the authenticated user's orders, newest first.
- * @param {string} userId
+ * Fetch the signed-in user's orders, newest first.
  * @returns {Promise<Array>}
  */
-export async function fetchMyOrders(userId) {
-  if (!supabase || !userId) return []
-  const { data, error } = await supabase
-    .from('orders')
-    .select(ORDER_SELECT)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data ?? []
+export async function fetchMyOrders() {
+  return (await api('/orders')) ?? []
 }
 
 /**
- * Fetch a single order belonging to the user, with its items.
- * @param {string} userId
+ * Fetch a single order belonging to the signed-in user, with its items.
  * @param {string} orderId
  * @returns {Promise<object|null>} null when not found / not owned
  */
-export async function fetchOrderById(userId, orderId) {
-  if (!supabase || !userId) return null
-  const { data, error } = await supabase
-    .from('orders')
-    .select(ORDER_SELECT)
-    .eq('id', orderId)
-    .eq('user_id', userId)
-    .maybeSingle()
-  if (error) throw error
-  return data
+export async function fetchOrderById(orderId) {
+  try {
+    return await api(`/orders/${orderId}`)
+  } catch (error) {
+    if (error.status === 404) return null
+    throw error
+  }
 }
 
 /**
- * Create an order plus its order_items in one logical flow.
- *
- * Prices MUST come from a fresh Supabase fetch of current product prices —
- * this function never trusts client-side cart prices. The total_amount is
- * recalculated here from price_at_purchase x quantity so the stored total
- * always matches the database-backed line prices.
- *
- * If the order_items insert fails, the error is rethrown with `orderCreated`
- * set to true so the caller can be honest that the order was not completed.
- *
- * @param {string} userId
+ * Create an order and its line items.
+ * Only product ids and quantities are sent — the server looks up the current
+ * price for each line and computes the total from those prices.
  * @param {{
  *   shippingAddress: string,
- *   lines: Array<{ product_id: string, quantity: number, price_at_purchase: number }>,
+ *   lines: Array<{ product_id: string, quantity: number }>,
  * }} input
  * @returns {Promise<object>} the created order
  */
-export async function createOrder(userId, { shippingAddress, lines }) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-
-  const total = lines.reduce(
-    (sum, line) => sum + Number(line.price_at_purchase) * Number(line.quantity),
-    0,
-  )
-
-  const { data: order, error: orderError } = await supabase
-    .from('orders')
-    .insert({
-      user_id: userId,
-      status: 'pending',
-      total_amount: Math.round(total * 100) / 100,
+export async function createOrder({ shippingAddress, lines }) {
+  return api('/orders', {
+    method: 'POST',
+    body: {
       shipping_address: shippingAddress,
-    })
-    .select('id, created_at, status, total_amount, shipping_address')
-    .single()
-  if (orderError) throw orderError
-
-  if (lines.length > 0) {
-    const { error: itemsError } = await supabase.from('order_items').insert(
-      lines.map((line) => ({
-        order_id: order.id,
+      lines: lines.map((line) => ({
         product_id: line.product_id,
         quantity: line.quantity,
-        price_at_purchase: Number(line.price_at_purchase),
       })),
-    )
-    if (itemsError) {
-      const err = new Error(itemsError.message)
-      err.code = itemsError.code
-      err.orderCreated = true
-      throw err
-    }
-  }
-
-  return order
+    },
+  })
 }
 
 /**
- * Cancel a pending order. RLS only permits the owner to flip a pending order
- * to cancelled, so non-pending orders resolve to `data: null` here and are
- * reported as "can no longer be cancelled".
- * @param {string} userId
+ * Cancel one of the signed-in user's pending orders.
  * @param {string} orderId
  * @returns {Promise<object>} the cancelled order
  */
-export async function cancelOrder(userId, orderId) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('orders')
-    .update({ status: 'cancelled' })
-    .eq('id', orderId)
-    .eq('user_id', userId)
-    .eq('status', 'pending')
-    .select('id, status')
-    .maybeSingle()
-  if (error) throw error
-  if (!data) {
-    const err = new Error('Only pending orders can be cancelled.')
-    err.code = 'not-cancellable'
-    throw err
-  }
-  return data
+export async function cancelOrder(orderId) {
+  return api(`/orders/${orderId}/cancel`, { method: 'PATCH' })
 }
 
 /**
- * Convert a raw Supabase error into a friendly, user-facing message.
- * @param {{ code?: string, message?: string, orderCreated?: boolean } | null} error
+ * Mark a pending order as paid.
+ *
+ * This is a DEMO payment: no card is collected, no payment provider is
+ * contacted and no money moves. It exists so the order lifecycle
+ * (pending -> paid -> shipped) can be walked end to end.
+ * @param {string} orderId
+ * @returns {Promise<object>} the paid order
+ */
+export async function payOrder(orderId) {
+  return api(`/orders/${orderId}/pay`, { method: 'POST' })
+}
+
+/**
+ * Convert an API error into a friendly, user-facing message.
+ * @param {{ code?: string, message?: string } | null} error
  * @param {string} fallback
  * @returns {string}
  */
@@ -185,96 +102,78 @@ export function getOrderErrorMessage(
   fallback = 'Something went wrong. Please try again.',
 ) {
   if (!error) return ''
-
-  if (error.orderCreated) {
-    return 'We recorded the order but could not save its items. Please contact support so we can fix this — your cart was not cleared.'
-  }
-
-  const code = String(error.code || '')
-  if (code === 'PGRST116') {
-    return 'This order no longer exists.'
-  }
-  if (code === 'not-cancellable') {
-    return 'Only pending orders can be cancelled.'
-  }
-  if (code === '42501') {
-    return 'You do not have permission to perform that action.'
-  }
-  if (code === '23503') {
-    return 'A product in this order is no longer available.'
-  }
-
-  const raw = String(error.message || '')
-  if (/network|failed to fetch|fetch failed|load failed/i.test(raw)) {
+  if (isNetworkError(error)) {
     return 'Unable to reach the server. Please check your internet connection and try again.'
   }
 
+  // The server already phrased these for the customer ("Only 3 of X are in
+  // stock."), so passing them through beats a vaguer generic message.
+  const passThrough = [
+    'not-cancellable',
+    'not-payable',
+    'insufficient-stock',
+    'product-missing',
+    'invalid-quantity',
+    'empty-cart',
+    'invalid-status',
+    'validation',
+  ]
+  if (passThrough.includes(error.code)) {
+    return error.message || fallback
+  }
+
+  if (error.code === 'not-found') {
+    return 'This order no longer exists.'
+  }
+  if (error.code === 'forbidden' || error.code === 'auth-required') {
+    return 'You do not have permission to perform that action.'
+  }
   return fallback
 }
 
 // ---------------------------------------------------------------------------
-// Admin operations. The "Admins can manage all orders" RLS policy (is_admin())
-// is the gatekeeper — these functions never bypass it; non-admins simply see
-// their own rows or get rejected by the policy.
+// Admin operations. The server checks the admin role on every one of these —
+// a non-admin gets a 403, never a partial result.
 // ---------------------------------------------------------------------------
 
 /**
  * Fetch ALL orders (admin view). Status filtering is done client-side by the
- * admin page from this single listing. Only visible through the admin RLS
- * policy — non-admins just see their own rows.
+ * admin page from this single listing.
  * @returns {Promise<Array>}
  */
 export async function fetchAllOrders() {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('orders')
-    .select(ADMIN_ORDER_SELECT)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data ?? []
+  return (await api('/orders/admin')) ?? []
 }
 
 /**
- * Fetch a single order by id WITHOUT the owner filter (admin view of any
- * customer's order). Only works through the "Admins can manage all orders"
- * RLS policy.
+ * Fetch any customer's order by id (admin view).
  * @param {string} orderId
  * @returns {Promise<object|null>}
  */
 export async function fetchAdminOrderById(orderId) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('orders')
-    .select(ORDER_SELECT)
-    .eq('id', orderId)
-    .maybeSingle()
-  if (error) throw error
-  return data
+  try {
+    return await api(`/orders/admin/${orderId}`)
+  } catch (error) {
+    if (error.status === 404) return null
+    throw error
+  }
 }
 
 /**
- * Update an order's status (admin only — enforced by RLS).
+ * Update an order's status (admin only).
  * @param {{ orderId: string, status: string }} input
- * @returns {Promise<object>} the updated order (id, status)
+ * @returns {Promise<object>} the updated order
  */
 export async function updateOrderStatus({ orderId, status }) {
-  if (!supabase) throw new Error('Supabase client not initialized')
   if (!ORDER_STATUSES.includes(status)) {
     const err = new Error('Invalid order status.')
     err.code = 'invalid-status'
     throw err
   }
-  const { data, error } = await supabase
-    .from('orders')
-    .update({ status })
-    .eq('id', orderId)
-    .select('id, status')
-    .single()
-  if (error) throw error
-  return data
+  return api(`/orders/admin/${orderId}/status`, { method: 'PATCH', body: { status } })
 }
 
-/** Short, human-friendly order reference (first 8 chars of the uuid). */
+/** Short, human-friendly order reference (first 8 characters of the id). */
 export function shortOrderId(orderId) {
   if (!orderId) return ''
   return `#${String(orderId).replace(/-/g, '').slice(0, 8).toUpperCase()}`

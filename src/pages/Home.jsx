@@ -430,7 +430,7 @@ function NextAppointment() {
   useEffect(() => {
     if (!user) return
     let active = true
-    fetchAppointments(user.id)
+    fetchAppointments()
       .then((rows) => {
         if (active) setAppointments(rows)
       })

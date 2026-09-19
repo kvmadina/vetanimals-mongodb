@@ -7,6 +7,7 @@ import {
   fetchAdminOrderById,
   fetchOrderById,
   getOrderErrorMessage,
+  payOrder,
   shortOrderId,
 } from '../lib/orders.js'
 import { formatPrice } from '../lib/shop.js'
@@ -33,16 +34,18 @@ export default function OrderDetails() {
   const [confirming, setConfirming] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
+  const [paying, setPaying] = useState(false)
+  const [payError, setPayError] = useState('')
 
   const loadOrder = useCallback(async () => {
     setLoadError('')
     setNotFound(false)
     try {
-      // Admins can open any customer's order (admin RLS policy); owners are
-      // scoped to their own orders.
+      // Admins can open any customer's order through the admin endpoint;
+      // owners are scoped to their own orders.
       const data = isAdmin
         ? await fetchAdminOrderById(orderId)
-        : await fetchOrderById(user.id, orderId)
+        : await fetchOrderById(orderId)
       if (!data) {
         setNotFound(true)
         setOrder(null)
@@ -54,18 +57,37 @@ export default function OrderDetails() {
       setLoadError(getOrderErrorMessage(err, 'We could not load this order.'))
       setOrder(null)
     }
-  }, [user, orderId, isAdmin])
+  }, [orderId, isAdmin])
 
+  // user?.id is in the deps so switching accounts refetches, even though the
+  // request itself carries no id.
   useEffect(() => {
     loadOrder()
-  }, [loadOrder])
+  }, [loadOrder, user?.id])
+
+  // Demo payment — no card, no charge; the server just flips pending -> paid.
+  const handlePay = async () => {
+    if (paying) return
+    setPaying(true)
+    setPayError('')
+    try {
+      const paid = await payOrder(order.id)
+      setOrder(paid)
+      showToast('Payment confirmed')
+    } catch (err) {
+      console.error('[OrderDetails] Demo payment failed:', err)
+      setPayError(getOrderErrorMessage(err, 'Could not confirm the payment. Please try again.'))
+    } finally {
+      setPaying(false)
+    }
+  }
 
   const handleCancel = async () => {
     if (cancelling) return
     setCancelling(true)
     setCancelError('')
     try {
-      await cancelOrder(user.id, order.id)
+      await cancelOrder(order.id)
       setOrder((prev) => (prev ? { ...prev, status: 'cancelled' } : prev))
       showToast('Order cancelled')
     } catch (err) {
@@ -250,6 +272,24 @@ export default function OrderDetails() {
                           ? 'Your order is being processed.'
                           : 'This order is being processed.'}
                   </p>
+
+                  {order.status === 'pending' && isOwner && !confirming && (
+                    <>
+                      {payError && (
+                        <p role="alert" className="mt-4 text-sm text-red-600">
+                          {payError}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handlePay}
+                        disabled={paying}
+                        className="btn-primary mt-4 w-full"
+                      >
+                        {paying ? 'Confirming…' : 'Pay now (demo)'}
+                      </button>
+                    </>
+                  )}
 
                   {order.status === 'pending' && isOwner &&
                     (confirming ? (

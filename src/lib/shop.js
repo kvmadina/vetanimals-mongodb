@@ -1,34 +1,11 @@
 // ---------------------------------------------------------------------------
 // Shop data layer.
-// Reads real data from public.products and public.categories through the
-// shared Supabase client. RLS limits public reads to active products only
-// (is_active = true); we also filter explicitly for safety.
+// Reads the catalogue from /api/products and /api/categories. The API only
+// ever returns active products, so nothing here has to filter for that.
 // ---------------------------------------------------------------------------
-import { supabase } from './supabase'
-
-const PRODUCT_SELECT = `
-  id,
-  created_at,
-  name,
-  description,
-  price,
-  image_url,
-  stock,
-  is_active,
-  species,
-  category_id,
-  categories ( id, name, slug )
-`
+import { api, isNetworkError, queryString } from './api.js'
 
 const RECENT_STORAGE_KEY = 'vetanimals:recent-products'
-
-/** Strip PostgREST-special characters from a search term. */
-function sanitizeSearchTerm(search) {
-  return search
-    .replace(/[(),%_]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
 
 /**
  * Fetch active products with optional filters.
@@ -52,61 +29,8 @@ export async function fetchProducts({
   priceRange = '',
   limit = null,
 } = {}) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-
-  let query = supabase
-    .from('products')
-    .select(PRODUCT_SELECT)
-    .eq('is_active', true)
-
-  if (categoryId) {
-    query = query.eq('category_id', categoryId)
-  }
-  if (species) {
-    query = query.eq('species', species)
-  }
-  if (availability === 'in-stock') {
-    query = query.gt('stock', 0)
-  } else if (availability === 'low-stock') {
-    query = query.gt('stock', 0).lte('stock', 5)
-  } else if (availability === 'out-of-stock') {
-    query = query.eq('stock', 0)
-  }
-  if (priceRange === 'under-25') {
-    query = query.lt('price', 25)
-  } else if (priceRange === '25-50') {
-    query = query.gte('price', 25).lte('price', 50)
-  } else if (priceRange === 'over-50') {
-    query = query.gt('price', 50)
-  }
-
-  const term = sanitizeSearchTerm(search)
-  if (term) {
-    // Internal spaces become wildcards so multi-word queries match across
-    // word boundaries ("dog food" → %dog%food%). Note: PostgREST's `or()`
-    // does not support embedded filters (categories.name), so category
-    // search is handled by the category filter instead.
-    const q = `%${term.replace(/\s+/g, '%')}%`
-    query = query.or(`name.ilike.${q},description.ilike.${q},species.ilike.${q}`)
-  }
-
-  if (sort === 'price-asc') {
-    query = query.order('price', { ascending: true })
-  } else if (sort === 'price-desc') {
-    query = query.order('price', { ascending: false })
-  } else if (sort === 'name-asc') {
-    query = query.order('name', { ascending: true })
-  } else {
-    query = query.order('created_at', { ascending: false })
-  }
-
-  if (Number.isFinite(Number(limit)) && Number(limit) > 0) {
-    query = query.limit(Math.round(Number(limit)))
-  }
-
-  const { data, error } = await query
-  if (error) throw error
-  return data ?? []
+  const query = queryString({ categoryId, species, search, sort, availability, priceRange, limit })
+  return (await api(`/products${query}`)) ?? []
 }
 
 /**
@@ -114,13 +38,7 @@ export async function fetchProducts({
  * @returns {Promise<Array>}
  */
 export async function fetchCategories() {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('categories')
-    .select('id, name, slug')
-    .order('name')
-  if (error) throw error
-  return data ?? []
+  return (await api('/categories')) ?? []
 }
 
 /**
@@ -128,15 +46,7 @@ export async function fetchCategories() {
  * @returns {Promise<string[]>}
  */
 export async function fetchSpecies() {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('products')
-    .select('species')
-    .eq('is_active', true)
-    .not('species', 'is', null)
-  if (error) throw error
-  const values = [...new Set((data ?? []).map((row) => row.species).filter(Boolean))]
-  return values.sort((a, b) => a.localeCompare(b))
+  return (await api('/products/species')) ?? []
 }
 
 /**
@@ -145,15 +55,13 @@ export async function fetchSpecies() {
  * @returns {Promise<object|null>} null when not found or inactive
  */
 export async function fetchProductById(id) {
-  if (!supabase) throw new Error('Supabase client not initialized')
-  const { data, error } = await supabase
-    .from('products')
-    .select(PRODUCT_SELECT)
-    .eq('id', id)
-    .eq('is_active', true)
-    .maybeSingle()
-  if (error) throw error
-  return data
+  try {
+    return await api(`/products/${id}`)
+  } catch (error) {
+    // A missing product is an empty state for the page, not a failure.
+    if (error.status === 404) return null
+    throw error
+  }
 }
 
 /**
@@ -163,24 +71,8 @@ export async function fetchProductById(id) {
  * @returns {Promise<Array>}
  */
 export async function fetchRelatedProducts(product, limit = 4) {
-  if (!supabase || !product?.id) return []
-  let query = supabase
-    .from('products')
-    .select(PRODUCT_SELECT)
-    .eq('is_active', true)
-    .neq('id', product.id)
-    .limit(limit)
-
-  const orParts = []
-  if (product.category_id) orParts.push(`category_id.eq.${product.category_id}`)
-  if (product.species) orParts.push(`species.eq.${product.species}`)
-  if (orParts.length > 0) {
-    query = query.or(orParts.join(','))
-  }
-
-  const { data, error } = await query
-  if (error) throw error
-  return data ?? []
+  if (!product?.id) return []
+  return (await api(`/products/${product.id}/related${queryString({ limit })}`)) ?? []
 }
 
 /**
@@ -190,14 +82,8 @@ export async function fetchRelatedProducts(product, limit = 4) {
  */
 export async function fetchProductsByIds(ids) {
   const clean = [...new Set(ids)].filter(Boolean)
-  if (!supabase || clean.length === 0) return []
-  const { data, error } = await supabase
-    .from('products')
-    .select(PRODUCT_SELECT)
-    .in('id', clean)
-    .eq('is_active', true)
-  if (error) throw error
-  return data ?? []
+  if (clean.length === 0) return []
+  return (await api(`/products${queryString({ ids: clean.join(',') })}`)) ?? []
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +124,7 @@ export function formatPrice(value) {
 }
 
 /**
- * Convert a raw Supabase error into a friendly shop message.
+ * Convert an API error into a friendly shop message.
  * @param {{ code?: string, message?: string } | null} error
  * @param {string} fallback
  * @returns {string}
@@ -248,19 +134,14 @@ export function getShopErrorMessage(
   fallback = 'Something went wrong. Please try again.',
 ) {
   if (!error) return ''
-
-  const code = String(error.code || '')
-  if (code === 'PGRST116') {
-    return 'This product is no longer available.'
-  }
-  if (code === '42501') {
-    return 'You do not have permission to perform that action.'
-  }
-
-  const raw = String(error.message || '')
-  if (/network|failed to fetch|fetch failed|load failed/i.test(raw)) {
+  if (isNetworkError(error)) {
     return 'Unable to reach the server. Please check your internet connection and try again.'
   }
-
+  if (error.code === 'not-found') {
+    return 'This product is no longer available.'
+  }
+  if (error.code === 'forbidden') {
+    return 'You do not have permission to perform that action.'
+  }
   return fallback
 }

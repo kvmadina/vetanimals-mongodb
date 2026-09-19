@@ -7,7 +7,7 @@ import {
   getAppointmentErrorMessage,
   updateVetAppointment,
 } from '../lib/appointments.js'
-import { fetchVetsByUserId } from '../lib/vets.js'
+import { fetchMyVetProfiles } from '../lib/vets.js'
 import AppHeader from '../components/AppHeader.jsx'
 import Avatar from '../components/Avatar.jsx'
 import {
@@ -96,8 +96,8 @@ export default function VetDashboard() {
     setActionError('')
     try {
       const [vetRows, appointmentRows] = await Promise.all([
-        fetchVetsByUserId(user.id),
-        fetchVetAppointments(user.id),
+        fetchMyVetProfiles(),
+        fetchVetAppointments(),
       ])
       setVets(vetRows)
       setAppointments(appointmentRows)

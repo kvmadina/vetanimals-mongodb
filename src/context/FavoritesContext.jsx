@@ -31,7 +31,7 @@ const FavoritesContext = createContext({
 })
 
 /**
- * Favorites state. Supabase (public.favorites) is the single source of truth
+ * Favorites state. The server (/api/favorites) is the single source of truth
  * for authenticated users. Supports three target types — products,
  * veterinarians and clinics — each enforced by its own partial unique index.
  * Unauthenticated users have empty sets; toggles throw { code: 'auth-required' }.
@@ -56,9 +56,9 @@ export function FavoritesProvider({ children }) {
     let active = true
     setFavoritesLoading(true)
     Promise.all([
-      fetchFavoriteProductIds(userId),
-      fetchFavoriteVetIds(userId),
-      fetchFavoriteClinicIds(userId),
+      fetchFavoriteProductIds(),
+      fetchFavoriteVetIds(),
+      fetchFavoriteClinicIds(),
     ])
       .then(([productIds, vetIds, clinicIds]) => {
         if (!active) return
@@ -88,7 +88,7 @@ export function FavoritesProvider({ children }) {
 
       const wasFavorite = favoriteIds.has(productId)
 
-      // Optimistic update, rolled back if Supabase rejects the change
+      // Optimistic update, rolled back if the server rejects the change
       setFavoriteIds((prev) => {
         const next = new Set(prev)
         if (wasFavorite) next.delete(productId)
@@ -98,9 +98,9 @@ export function FavoritesProvider({ children }) {
 
       try {
         if (wasFavorite) {
-          await removeFavorite(user.id, productId)
+          await removeFavorite(productId)
         } else {
-          await addFavorite(user.id, productId)
+          await addFavorite(productId)
         }
       } catch (err) {
         setFavoriteIds((prev) => {
@@ -134,9 +134,9 @@ export function FavoritesProvider({ children }) {
 
       try {
         if (wasFavorite) {
-          await removeVetFavorite(user.id, vetId)
+          await removeVetFavorite(vetId)
         } else {
-          await addVetFavorite(user.id, vetId)
+          await addVetFavorite(vetId)
         }
       } catch (err) {
         setVetFavoriteIds((prev) => {
@@ -173,9 +173,9 @@ export function FavoritesProvider({ children }) {
 
       try {
         if (wasFavorite) {
-          await removeClinicFavorite(user.id, clinicId)
+          await removeClinicFavorite(clinicId)
         } else {
-          await addClinicFavorite(user.id, clinicId)
+          await addClinicFavorite(clinicId)
         }
       } catch (err) {
         setClinicFavoriteIds((prev) => {

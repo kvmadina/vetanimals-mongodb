@@ -83,7 +83,7 @@ export default function AdminOrders() {
     setUpdating({ orderId: order.id, status })
     setActionError('')
 
-    // Optimistic update, rolled back if Supabase rejects the change.
+    // Optimistic update, rolled back if the server rejects the change.
     const previous = orders
     setOrders((prev) =>
       prev.map((row) => (row.id === order.id ? { ...row, status } : row)),

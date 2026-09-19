@@ -3,7 +3,7 @@ import { formatDistance } from '../lib/geo.js'
 import { BagIcon, CalendarIcon, MapPinIcon, NavigationIcon, PawIcon, PhoneIcon } from './Icons.jsx'
 
 /**
- * "Near You" location card (clinic from Supabase, or pet store from OSM).
+ * "Near You" location card (clinic from the API, or pet store from OSM).
  * @param {{
  *   place: {
  *     id: string, name: string, type: 'clinic'|'store',

@@ -49,7 +49,7 @@ export default function Clinics() {
   const [searchInput, setSearchInput] = useState('')
   const [query, setQuery] = useState('')
 
-  // Debounce the search box before hitting Supabase
+  // Debounce the search box before hitting the API
   useEffect(() => {
     const timer = setTimeout(() => setQuery(searchInput.trim()), 350)
     return () => clearTimeout(timer)

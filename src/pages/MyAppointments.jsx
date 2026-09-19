@@ -87,7 +87,7 @@ export default function MyAppointments() {
     setStatus('loading')
     setError('')
     try {
-      const data = await fetchAppointments(user.id)
+      const data = await fetchAppointments()
       setAppointments(data)
       setStatus('ready')
     } catch (err) {
@@ -140,14 +140,14 @@ export default function MyAppointments() {
     setCancellingId(appt.id)
     setCancelError('')
     try {
-      await cancelAppointment(user.id, appt.id)
+      await cancelAppointment(appt.id)
       setAppointments((prev) =>
         prev.map((a) => (a.id === appt.id ? { ...a, status: 'cancelled' } : a)),
       )
       showToast('Appointment cancelled')
     } catch (err) {
       console.error('[MyAppointments] Cancel failed:', err)
-      // The database refused (e.g. it is no longer pending) — show the real error.
+      // The server refused (e.g. it is no longer pending) — show the real error.
       setCancelError(
         getAppointmentErrorMessage(err, 'Could not cancel this appointment. Please try again.'),
       )

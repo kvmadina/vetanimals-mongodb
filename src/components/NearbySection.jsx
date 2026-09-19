@@ -62,7 +62,7 @@ export default function NearbySection() {
   const [radiusKm, setRadiusKm] = useState(10)
   const [nearMe, setNearMe] = useState(true)
 
-  // Clinics from Supabase (single fetch; the map/list reuse this data)
+  // Clinics from the API (single fetch; the map/list reuse this data)
   useEffect(() => {
     let active = true
     fetchClinics()

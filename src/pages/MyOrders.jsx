@@ -36,25 +36,27 @@ export default function MyOrders() {
   const loadOrders = useCallback(async () => {
     setLoadError('')
     try {
-      const data = await fetchMyOrders(user.id)
+      const data = await fetchMyOrders()
       setOrders(data)
     } catch (err) {
       console.error('[MyOrders] Failed to load orders:', err)
       setLoadError(getOrderErrorMessage(err, 'We could not load your orders.'))
       setOrders([])
     }
-  }, [user])
+  }, [])
 
+  // user?.id is in the deps so switching accounts refetches, even though the
+  // request itself carries no id.
   useEffect(() => {
     loadOrders()
-  }, [loadOrders])
+  }, [loadOrders, user?.id])
 
   const handleCancel = async (order) => {
     if (cancellingId) return
     setCancellingId(order.id)
     setCancelError('')
     try {
-      await cancelOrder(user.id, order.id)
+      await cancelOrder(order.id)
       setOrders((prev) =>
         prev.map((row) => (row.id === order.id ? { ...row, status: 'cancelled' } : row)),
       )

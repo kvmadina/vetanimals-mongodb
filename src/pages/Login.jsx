@@ -171,15 +171,6 @@ export default function Login() {
         </button>
       </form>
 
-      <p className="mt-4 text-center text-sm">
-        <Link
-          to="/forgot-password"
-          className="font-medium text-slate-500 transition hover:text-emerald-700"
-        >
-          Forgot your password?
-        </Link>
-      </p>
-
       <p className="mt-6 text-center text-sm text-slate-600">
         New to VetAnimals?{' '}
         <Link
