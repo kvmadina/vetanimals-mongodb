@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
-import PageLoader from './PageLoader'
+import { useAuth } from '../context/AuthContext.jsx'
+import PageLoader from './PageLoader.jsx'
 
 export default function ProtectedRoute({ children, allowedRoles }) {
   const { user, profile, loading } = useAuth()

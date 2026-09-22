@@ -30,8 +30,6 @@ export default function Register() {
   const [fieldErrors, setFieldErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [pendingConfirmation, setPendingConfirmation] = useState(false)
-  const [registeredEmail, setRegisteredEmail] = useState('')
 
   if (loading) {
     return <PageLoader label="Restoring your session…" />
@@ -75,9 +73,10 @@ export default function Register() {
 
     setSubmitting(true)
     try {
-      // The `handle_new_user()` database trigger creates the profile row
-      // in public.profiles from the metadata passed below.
-      const { data, error } = await signUp(
+      // Registration signs the account straight in — the API returns a token
+      // with the new profile, so AuthContext updates `user` and the
+      // <Navigate> above redirects. There is no email-confirmation step.
+      const { error } = await signUp(
         email.trim(),
         password,
         fullName.trim(),
@@ -85,49 +84,13 @@ export default function Register() {
       )
       if (error) {
         setFormError(getAuthErrorMessage(error))
-        return
       }
-      if (data?.session) {
-        // Email confirmation is disabled → a session exists, AuthContext
-        // updates `user` and this component redirects automatically.
-        return
-      }
-      // Email confirmation is enabled → ask the user to verify their inbox.
-      setRegisteredEmail(email.trim())
-      setPendingConfirmation(true)
     } catch (err) {
       console.error('[Register] Unexpected sign-up error:', err)
       setFormError('Something went wrong. Please try again.')
     } finally {
       setSubmitting(false)
     }
-  }
-
-  // Success state shown when an email confirmation link is required.
-  if (pendingConfirmation) {
-    return (
-      <AuthLayout title="Check your email" subtitle="One last step before you're in.">
-        <div className="flex flex-col items-center py-4 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
-            <MailIcon className="h-8 w-8" />
-          </span>
-          <h2 className="mt-6 text-lg font-semibold text-slate-900">
-            Confirmation link sent
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed text-slate-500">
-            We emailed a confirmation link to{' '}
-            <span className="font-semibold text-slate-700">{registeredEmail}</span>.
-            Click it to activate your account, then sign in to get started.
-          </p>
-          <Link to="/login" className="btn-primary mt-8 w-full">
-            Go to sign in
-          </Link>
-          <p className="mt-4 text-xs text-slate-400">
-            Didn&apos;t receive it? Check your spam folder.
-          </p>
-        </div>
-      </AuthLayout>
-    )
   }
 
   return (

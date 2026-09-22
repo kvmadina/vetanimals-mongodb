@@ -190,9 +190,9 @@ export default function AppointmentNew() {
     [vets, vetId],
   )
 
-  // Prevent the user double-booking themselves: check their own non-cancelled
-  // appointments for the selected vet + datetime. Clinic-wide availability is
-  // never claimed (RLS only exposes the user's own rows).
+  // Warn about a taken slot before the user reaches the review step. This is
+  // only a courtesy check — the server refuses a taken slot on submit, which
+  // is what actually prevents a double booking.
   useEffect(() => {
     if (!vetId || !date || !time) {
       setSlotBusy(false)
@@ -549,8 +549,8 @@ export default function AppointmentNew() {
                     <div role="status" className="form-banner--error mt-5">
                       <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
                       <span>
-                        You already have an appointment with this veterinarian at
-                        that time. Please choose another time.
+                        This veterinarian is already booked at that time. Please
+                        choose another time.
                       </span>
                     </div>
                   )}

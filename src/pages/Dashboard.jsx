@@ -45,7 +45,7 @@ export default function Dashboard() {
   const [logoutError, setLogoutError] = useState('')
 
   // If the profile hasn't loaded yet (e.g. right after a fresh login),
-  // fetch it now from public.profiles.
+  // fetch it now from the API.
   useEffect(() => {
     if (user && !profile && !refreshing) {
       setRefreshing(true)

@@ -60,14 +60,6 @@ body {
   .form-banner--error {
     @apply flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700;
   }
-
-  .no-scrollbar {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    &::-webkit-scrollbar {
-      display: none;
-    }
-  }
 }
 
 /* ---------------------------------------------------------------------------

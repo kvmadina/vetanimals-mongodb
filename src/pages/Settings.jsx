@@ -21,7 +21,7 @@ const PHONE_PATTERN = /^[+()\-.\s\d]{7,20}$/
 const URL_PATTERN = /^https?:\/\/\S+$/i
 
 export default function Settings() {
-  const { user, profile, refreshProfile, updateProfile, updatePassword, signIn } = useAuth()
+  const { user, profile, refreshProfile, updateProfile, updatePassword } = useAuth()
   const { showToast } = useToast()
 
   const [fullName, setFullName] = useState('')
@@ -137,13 +137,9 @@ export default function Settings() {
 
     setSavingPassword(true)
     try {
-      // Verify the current password first, then set the new one.
-      const { error: signInError } = await signIn(user?.email || '', currentPassword)
-      if (signInError) {
-        setPasswordError('Your current password is incorrect.')
-        return
-      }
-      const { error } = await updatePassword(newPassword)
+      // The server checks the current password itself — no need to sign in
+      // again here, which would also needlessly replace the session token.
+      const { error } = await updatePassword(currentPassword, newPassword)
       if (error) {
         setPasswordError(getAuthErrorMessage(error, 'We could not update your password. Please try again.'))
         return

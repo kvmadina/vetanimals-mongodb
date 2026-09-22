@@ -5,6 +5,9 @@
 // cart is a suggestion, never a source of prices. The total is recomputed from
 // those prices, so the stored total always matches the stored lines.
 //
+// Stock is taken when the order is created and given back when it is
+// cancelled, so the catalogue always reflects what is actually available.
+//
 // Payment is a demo: POST /:id/pay flips a pending order to paid. There is no
 // card processing and no money moves.
 // ---------------------------------------------------------------------------
@@ -22,6 +25,28 @@ router.use(requireAuth)
 const ITEMS_POPULATE = {
   path: 'order_items',
   populate: { path: 'products', select: 'name image_url' },
+}
+
+/**
+ * Put units back into the catalogue.
+ * Best-effort on purpose: a line that cannot be restored is logged, never
+ * thrown, so it can't mask the failure the caller is already reporting.
+ * @param {Array<{ product_id: unknown, quantity: number }>} lines
+ */
+async function giveBackStock(lines) {
+  for (const line of lines) {
+    try {
+      await Product.updateOne({ _id: line.product_id }, { $inc: { stock: line.quantity } })
+    } catch (error) {
+      console.error('[orders] Could not restore stock for', String(line.product_id), error)
+    }
+  }
+}
+
+/** Give every unit on a stored order back to the catalogue. */
+async function restoreOrderStock(orderId) {
+  const items = await OrderItem.find({ order_id: orderId }, 'product_id quantity').lean()
+  await giveBackStock(items)
 }
 
 // -- Admin -------------------------------------------------------------------
@@ -59,12 +84,25 @@ router.patch(
       throw badRequest('That is not a valid order status.', 'invalid-status')
     }
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { returnDocument: 'after', runValidators: true },
-    )
+    const order = await Order.findById(req.params.id)
     if (!order) throw notFound('This order no longer exists.')
+
+    const wasCancelled = order.status === 'cancelled'
+    // Cancelling already returned the units to the catalogue, so reopening the
+    // order would sell stock that is no longer held. The admin UI treats
+    // cancelled as terminal; this is the server saying the same thing.
+    if (wasCancelled && status !== 'cancelled') {
+      throw badRequest(
+        'A cancelled order cannot be reopened — its items were returned to stock.',
+        'order-cancelled',
+      )
+    }
+
+    order.status = status
+    await order.save()
+
+    if (status === 'cancelled' && !wasCancelled) await restoreOrderStock(order.id)
+
     res.json(order)
   }),
 )
@@ -123,19 +161,40 @@ router.post(
 
     const total = priced.reduce((sum, line) => sum + line.price_at_purchase * line.quantity, 0)
 
-    const order = await Order.create({
-      user_id: req.user.id,
-      status: 'pending',
-      total_amount: Math.round(total * 100) / 100,
-      shipping_address,
-    })
-
+    // Take the stock one line at a time, and only while it is still there:
+    // the `stock: { $gte: quantity }` filter makes each decrement atomic, so
+    // two customers cannot both buy the same last unit. The checks above ran
+    // against a read that is already stale by now — this is the one that counts.
+    const taken = []
+    let order
     try {
+      for (const line of priced) {
+        const reserved = await Product.findOneAndUpdate(
+          { _id: line.product_id, is_active: true, stock: { $gte: line.quantity } },
+          { $inc: { stock: -line.quantity } },
+        )
+        if (!reserved) {
+          throw badRequest(
+            'Someone else just bought the last of an item in this order. Please review your cart.',
+            'insufficient-stock',
+          )
+        }
+        taken.push(line)
+      }
+
+      order = await Order.create({
+        user_id: req.user.id,
+        status: 'pending',
+        total_amount: Math.round(total * 100) / 100,
+        shipping_address,
+      })
+
       await OrderItem.insertMany(priced.map((line) => ({ ...line, order_id: order.id })))
     } catch (error) {
-      // Never leave an order with no lines behind — undo it and report the
-      // failure honestly instead of showing the customer a half-saved order.
-      await Order.findByIdAndDelete(order.id)
+      // Never leave a half-saved order or swallowed stock behind — undo both
+      // and report the failure honestly.
+      if (order) await Order.findByIdAndDelete(order.id)
+      await giveBackStock(taken)
       throw error
     }
 
@@ -165,6 +224,8 @@ router.patch(
 
     order.status = 'cancelled'
     await order.save()
+    // The customer is no longer buying these — put them back on the shelf.
+    await restoreOrderStock(order.id)
     res.json(order)
   }),
 )

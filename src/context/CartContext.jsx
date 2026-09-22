@@ -99,11 +99,11 @@ export function CartProvider({ children }) {
 
   const updateQuantity = useCallback((productId, quantity) => {
     setItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== productId) return item
-        const qty = Math.max(1, Math.min(quantity, item.stock))
-        return qty <= 0 ? item : { ...item, quantity: qty }
-      }),
+      prev.map((item) =>
+        item.id === productId
+          ? { ...item, quantity: Math.max(1, Math.min(quantity, item.stock)) }
+          : item,
+      ),
     )
   }, [])
 

@@ -21,6 +21,8 @@ import {
 
 const FavoritesContext = createContext({
   favoriteIds: new Set(),
+  vetFavoriteIds: new Set(),
+  clinicFavoriteIds: new Set(),
   favoritesLoading: false,
   isFavorite: () => false,
   toggleFavorite: async () => {},

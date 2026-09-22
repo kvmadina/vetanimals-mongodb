@@ -56,19 +56,3 @@ export function requireRole(...roles) {
     next()
   }
 }
-
-/**
- * Attach req.user when a valid token is present, but never reject.
- * Used by endpoints that are public yet behave differently when signed in.
- */
-export const optionalAuth = route(async (req, _res, next) => {
-  const header = req.headers.authorization || ''
-  if (!header.startsWith('Bearer ')) return next()
-  try {
-    const payload = jwt.verify(header.slice(7), getSecret())
-    req.user = await Profile.findById(payload.sub)
-  } catch {
-    // An invalid token on a public route is simply "not signed in".
-  }
-  next()
-})

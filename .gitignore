@@ -17,6 +17,9 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Tooling scratch output
+.playwright-mcp
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

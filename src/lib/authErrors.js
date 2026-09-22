@@ -10,6 +10,7 @@ const MESSAGE_BY_CODE = {
   user_already_exists: 'An account with this email already exists. Try signing in instead.',
   weak_password: 'Your password is too short. Use at least 6 characters.',
   same_password: 'New password must be different from your current password.',
+  invalid_current_password: 'Your current password is incorrect.',
   'auth-required': 'Your session has expired. Please sign in again.',
 }
 

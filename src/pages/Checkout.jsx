@@ -70,7 +70,7 @@ async function runVerification(items) {
 
 function FieldError({ message }) {
   if (!message) return null
-  return <p className="mt-1.5 text-sm text-red-600">{message}</p>
+  return <p className="field-error">{message}</p>
 }
 
 export default function Checkout() {
@@ -151,6 +151,9 @@ export default function Checkout() {
     setShipping((prev) => ({ ...prev, [name]: value }))
     setErrors((prev) => ({ ...prev, [name]: '' }))
   }
+
+  const inputClass = (field) =>
+    `input-field ${errors[field] ? 'input-field--error' : ''}`
 
   const validateShipping = () => {
     const next = {}
@@ -411,7 +414,7 @@ export default function Checkout() {
                     value={shipping.fullName}
                     onChange={handleChange}
                     placeholder="Full name"
-                    className="form-input"
+                    className={inputClass('fullName')}
                   />
                   <FieldError message={errors.fullName} />
                 </div>
@@ -427,7 +430,7 @@ export default function Checkout() {
                     value={shipping.address}
                     onChange={handleChange}
                     placeholder="123 Meadow Lane"
-                    className="form-input"
+                    className={inputClass('address')}
                   />
                   <FieldError message={errors.address} />
                 </div>
@@ -443,7 +446,7 @@ export default function Checkout() {
                     value={shipping.city}
                     onChange={handleChange}
                     placeholder="Springfield"
-                    className="form-input"
+                    className={inputClass('city')}
                   />
                   <FieldError message={errors.city} />
                 </div>
@@ -459,7 +462,7 @@ export default function Checkout() {
                     value={shipping.state}
                     onChange={handleChange}
                     placeholder="CA"
-                    className="form-input"
+                    className={inputClass('state')}
                   />
                   <FieldError message={errors.state} />
                 </div>
@@ -475,7 +478,7 @@ export default function Checkout() {
                     value={shipping.zip}
                     onChange={handleChange}
                     placeholder="90210"
-                    className="form-input"
+                    className={inputClass('zip')}
                   />
                   <FieldError message={errors.zip} />
                 </div>
@@ -612,8 +615,8 @@ export default function Checkout() {
 
                 <p className="mt-4 text-xs leading-relaxed text-slate-400">
                   Prices and stock are re-checked against the shop at checkout.
-                  Quantities are validated but not reserved — they may change if
-                  other customers order first.
+                  Your items are taken from stock when the order is placed, and
+                  returned if you cancel it.
                 </p>
               </>
             )}

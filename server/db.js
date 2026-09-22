@@ -26,8 +26,8 @@ export async function connectDB() {
   cache.promise = mongoose
     .connect(uri, {
       serverSelectionTimeoutMS: 5000,
-      // One connection per container is plenty: a serverless invocation
-      // handles a single request at a time.
+      // Small pool on purpose: Atlas caps total connections, and every warm
+      // serverless container keeps its own pool open.
       maxPoolSize: 10,
     })
     .then((connection) => {

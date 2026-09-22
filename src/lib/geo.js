@@ -3,8 +3,8 @@
 //
 // - Browser geolocation is requested at most once per session (result cached
 //   in sessionStorage so re-mounts never re-prompt).
-// - Clinic data always comes from public.clinics (coordinates from
-//   latitude/longitude columns — never invented).
+// - Clinic data always comes from /api/clinics (coordinates from the stored
+//   latitude/longitude fields — never invented).
 // - Pet stores come from OpenStreetMap via the public Overpass API (real
 //   external location data; shop=pet nodes/ways near a point). When the API
 //   is unreachable we fail gracefully.

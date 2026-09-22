@@ -103,11 +103,18 @@ router.patch(
   }),
 )
 
+/**
+ * Change the signed-in user's password.
+ * The current password must be proved here, not just on the client: a stolen
+ * token must not be enough to lock the real owner out of their account.
+ */
 router.patch(
   '/password',
   requireAuth,
   route(async (req, res) => {
+    const currentPassword = String(req.body.current_password || '')
     const password = String(req.body.password || '')
+
     if (password.length < MIN_PASSWORD_LENGTH) {
       throw badRequest(
         `Your password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
@@ -116,7 +123,12 @@ router.patch(
     }
 
     const profile = await Profile.findById(req.user.id).select('+password_hash')
-    if (await bcrypt.compare(password, profile.password_hash)) {
+    if (!(await bcrypt.compare(currentPassword, profile.password_hash))) {
+      throw new ApiError(401, 'Your current password is incorrect.', 'invalid_current_password')
+    }
+    // The current password is already known to match the stored hash, so this
+    // comparison is the same test as re-hashing the new one.
+    if (currentPassword === password) {
       throw badRequest('New password must be different from your current password.', 'same_password')
     }
 

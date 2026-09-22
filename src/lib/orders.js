@@ -3,8 +3,8 @@
 //
 // Line prices are decided by the server from the current catalogue — whatever
 // the cart thinks a product costs is never used as the purchase price. The
-// server also validates quantities against current stock, but nothing here
-// claims stock is reserved: it is not.
+// server also takes the stock as it creates the order, and gives it back if
+// the order is cancelled.
 // ---------------------------------------------------------------------------
 import { api, isNetworkError } from './api.js'
 
@@ -116,6 +116,7 @@ export function getOrderErrorMessage(
     'invalid-quantity',
     'empty-cart',
     'invalid-status',
+    'order-cancelled',
     'validation',
   ]
   if (passThrough.includes(error.code)) {

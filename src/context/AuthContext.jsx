@@ -125,12 +125,20 @@ export function AuthProvider({ children }) {
 
   /**
    * Set a new password for the signed-in user.
+   * The server verifies `currentPassword` itself, so a valid token alone is
+   * never enough to change the password.
+   * @param {string} currentPassword
    * @param {string} newPassword
    * @returns {Promise<{ error: object|null }>}
    */
   const updatePassword = useCallback(
-    (newPassword) =>
-      toResult(api('/auth/password', { method: 'PATCH', body: { password: newPassword } })),
+    (currentPassword, newPassword) =>
+      toResult(
+        api('/auth/password', {
+          method: 'PATCH',
+          body: { current_password: currentPassword, password: newPassword },
+        }),
+      ),
     [],
   )
 

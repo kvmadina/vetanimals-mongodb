@@ -74,9 +74,9 @@ export async function updateVetAppointment({ appointmentId, status, notes }) {
 }
 
 /**
- * Count the caller's own non-cancelled appointments for a vet at a given time.
- * This only detects the user double-booking themselves — it deliberately does
- * not report clinic-wide availability.
+ * Count the non-cancelled appointments already on a vet's slot.
+ * A warning for the booking form only — the server refuses a taken slot when
+ * the booking is actually submitted.
  * @param {string} vetId
  * @param {string} isoDateTime
  * @returns {Promise<number>}
@@ -107,7 +107,9 @@ export function getAppointmentErrorMessage(
     'not-cancellable',
     'invalid-pet',
     'invalid-vet',
+    'invalid-date',
     'invalid-status',
+    'slot-taken',
     'validation',
   ]
   if (passThrough.includes(error.code)) {

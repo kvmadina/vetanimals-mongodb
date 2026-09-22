@@ -12,7 +12,7 @@ import { Appointment, APPOINTMENT_STATUSES } from '../models/Appointment.js'
 import { Pet } from '../models/Pet.js'
 import { Veterinarian } from '../models/Veterinarian.js'
 import { requireAuth } from '../middleware/auth.js'
-import { badRequest, forbidden, notFound, route } from '../middleware/errorHandler.js'
+import { ApiError, badRequest, forbidden, notFound, route } from '../middleware/errorHandler.js'
 
 const router = Router()
 
@@ -65,20 +65,23 @@ router.get(
 
 /**
  * GET /api/appointments/slot-count?vetId=&date=
- * How many of the CALLER's own non-cancelled bookings sit on this slot. Used
- * by the booking form to stop a user double-booking themselves; it deliberately
- * does not report other customers' bookings.
+ * How many non-cancelled bookings — from anyone — sit on this veterinarian's
+ * slot. The booking form uses it to warn before the user reaches the review
+ * step; POST below is what actually enforces it. Only the count is returned,
+ * never who booked it.
  */
 router.get(
   '/slot-count',
   route(async (req, res) => {
     const { vetId, date } = req.query
-    if (!vetId || !mongoose.isValidObjectId(vetId) || !date) return res.json({ count: 0 })
+    const when = new Date(date)
+    if (!vetId || !mongoose.isValidObjectId(vetId) || Number.isNaN(when.getTime())) {
+      return res.json({ count: 0 })
+    }
 
     const count = await Appointment.countDocuments({
-      user_id: req.user.id,
       veterinarian_id: vetId,
-      appointment_date: new Date(date),
+      appointment_date: when,
       status: { $ne: 'cancelled' },
     })
     res.json({ count })
@@ -97,6 +100,11 @@ router.post(
       throw badRequest('Choose one of your own pets for this visit.', 'invalid-pet')
     }
 
+    const when = new Date(appointment_date)
+    if (Number.isNaN(when.getTime())) {
+      throw badRequest('Choose a date and time for the visit.', 'invalid-date')
+    }
+
     // clinic_id is derived from the vet rather than trusted from the body, so
     // the booking can never point at a clinic the vet does not work at.
     const vet = mongoose.isValidObjectId(veterinarian_id)
@@ -104,12 +112,33 @@ router.post(
       : null
     if (!vet) throw badRequest('That veterinarian is no longer available.', 'invalid-vet')
 
+    // A veterinarian cannot be in two places at once, so the slot is refused
+    // whoever already holds it. This check — not the form — is the rule: the
+    // client's slot lookup is only a warning, and it is already stale by now.
+    //
+    // A unique index would close the last sliver of a race, but "unique unless
+    // cancelled" is not expressible as a partial index, so two requests landing
+    // in the same millisecond can still both pass. Rare, and a duplicate
+    // booking is visible and cancellable — unlike overselling stock.
+    const slotTaken = await Appointment.exists({
+      veterinarian_id: vet.id,
+      appointment_date: when,
+      status: { $ne: 'cancelled' },
+    })
+    if (slotTaken) {
+      throw new ApiError(
+        409,
+        'That time has just been booked. Please choose another slot.',
+        'slot-taken',
+      )
+    }
+
     const appointment = await Appointment.create({
       user_id: req.user.id,
       pet_id,
       veterinarian_id: vet.id,
       clinic_id: vet.clinic_id,
-      appointment_date,
+      appointment_date: when,
       status: 'pending',
       notes: notes || null,
     })

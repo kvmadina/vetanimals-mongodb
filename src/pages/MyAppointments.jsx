@@ -79,6 +79,9 @@ export default function MyAppointments() {
   const [status, setStatus] = useState('loading') // 'loading' | 'error' | 'ready'
   const [error, setError] = useState('')
   const [tab, setTab] = useState('upcoming')
+  // Separate states on purpose: one drives the confirmation prompt, the other
+  // marks the request as in flight so the button can't be pressed twice.
+  const [confirmingId, setConfirmingId] = useState(null)
   const [cancellingId, setCancellingId] = useState(null)
   const [cancelError, setCancelError] = useState('')
 
@@ -137,6 +140,7 @@ export default function MyAppointments() {
   )
 
   const handleCancel = async (appt) => {
+    if (cancellingId) return
     setCancellingId(appt.id)
     setCancelError('')
     try {
@@ -153,6 +157,7 @@ export default function MyAppointments() {
       )
     } finally {
       setCancellingId(null)
+      setConfirmingId(null)
     }
   }
 
@@ -196,6 +201,7 @@ export default function MyAppointments() {
               onClick={() => {
                 setTab(t.key)
                 setCancelError('')
+                setConfirmingId(null)
               }}
               className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600/30 ${
                 tab === t.key ? 'bg-emerald-700 text-white' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
@@ -336,7 +342,7 @@ export default function MyAppointments() {
 
                     {cancellable && (
                       <div className="mt-4 border-t border-slate-100 pt-4">
-                        {cancellingId === appt.id ? (
+                        {confirmingId === appt.id ? (
                           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
                             <p className="text-sm font-medium text-red-700">
                               Cancel this appointment?
@@ -344,14 +350,16 @@ export default function MyAppointments() {
                             <button
                               type="button"
                               onClick={() => handleCancel(appt)}
-                              className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-red-700"
+                              disabled={cancellingId === appt.id}
+                              className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              Yes, cancel
+                              {cancellingId === appt.id ? 'Cancelling…' : 'Yes, cancel'}
                             </button>
                             <button
                               type="button"
-                              onClick={() => setCancellingId(null)}
-                              className="text-sm font-medium text-slate-600 transition hover:text-slate-900"
+                              onClick={() => setConfirmingId(null)}
+                              disabled={cancellingId === appt.id}
+                              className="text-sm font-medium text-slate-600 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               Keep it
                             </button>
@@ -359,7 +367,10 @@ export default function MyAppointments() {
                         ) : (
                           <button
                             type="button"
-                            onClick={() => setCancellingId(appt.id)}
+                            onClick={() => {
+                              setCancelError('')
+                              setConfirmingId(appt.id)
+                            }}
                             className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-red-600"
                           >
                             Cancel appointment
